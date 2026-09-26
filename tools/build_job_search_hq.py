@@ -116,7 +116,7 @@ def as_date(v):
         return None
 
 
-def build(recruiters_csv, data_path, out, as_of):
+def build(recruiters_csv, data_path, out, as_of, include_log=True, log_url=""):
     data = json.load(open(data_path)) if data_path else {}
     log_rows = list(csv.DictReader(open(recruiters_csv))) if recruiters_csv else []
 
@@ -311,13 +311,16 @@ def build(recruiters_csv, data_path, out, as_of):
             c.alignment = WRAP
 
     # ---- Start Here ----
-    build_start(start, data.get("pipeline", []), as_of)
+    if not include_log:
+        # The live Drive copy keeps its message log in the auto-updated tracker instead.
+        wb.remove(log)
+    build_start(start, data.get("pipeline", []), as_of, include_log, log_url)
     wb.save(out)
     return {"pipeline": len(data.get("pipeline", [])), "log": log.max_row - 1,
-            "recruiters": recs.max_row - 1, "jobs": jobs.max_row - 1}
+            "recruiters": recs.max_row - 1, "jobs": jobs.max_row - 1, "log_tab": include_log}
 
 
-def build_start(ws, pipeline, as_of):
+def build_start(ws, pipeline, as_of, include_log=True, log_url=""):
     ws.column_dimensions["A"].width = 34
     ws.column_dimensions["B"].width = 14
     ws.column_dimensions["C"].width = 90
@@ -339,8 +342,9 @@ def build_start(ws, pipeline, as_of):
         ("Recruiters due a nurture touch",
          '=COUNTIFS(Recruiters!L:L,"<="&TODAY(),Recruiters!L:L,"<>")'),
         ("A-tier recruiters", '=COUNTIF(Recruiters!C:C,"A")'),
-        ("Messages logged (all time)", "=COUNTA('Inbox Log'!A:A)-1"),
     ]
+    if include_log:
+        counts.append(("Messages logged (all time)", "=COUNTA('Inbox Log'!A:A)-1"))
     for i, (label, f) in enumerate(counts, start=5):
         ws.cell(row=i, column=1, value=label)
         c = ws.cell(row=i, column=2, value=f)
@@ -366,7 +370,11 @@ def build_start(ws, pipeline, as_of):
     for tab, what in [
         ("Pipeline", "One row per live opportunity. Only this tab drives your day. Keep Stage, Next action and Due filled in on every open row."),
         ("Recruiters", "One row per recruiter. Tier A = placed or submitted you, or a specialist in your field; B = pitches your target roles; C = off-target; DNC = never reply. Next nurture = A every 6 weeks, B every 90 days."),
-        ("Inbox Log", "Every recruiter message, including declines. You add to it but never delete from it. It answers 'has this person contacted me before?'."),
+        ("Inbox Log", ("" if include_log else
+                       "Lives in the separate sheet 'LinkedIn Recruiter Tracker - Damian Ruiz', "
+                       f"which your daily inbox run updates automatically: {log_url} ")
+         + "Every recruiter message, including declines. You add to it but never delete "
+         "from it. It answers 'has this person contacted me before?'."),
         ("Job Leads", "Postings you found yourself (HiringCafe/Jobright sweeps). When you act on one, add it to Pipeline."),
         ("Templates", "Reply templates, so a reply takes 2 minutes instead of sitting as a draft for 3 weeks."),
     ]:
@@ -420,5 +428,9 @@ if __name__ == "__main__":
     ap.add_argument("--data")
     ap.add_argument("--out", required=True)
     ap.add_argument("--as-of", default=date.today().isoformat())
+    ap.add_argument("--no-log", action="store_true",
+                    help="omit the Inbox Log tab (Drive copy links to the live tracker instead)")
+    ap.add_argument("--log-url", default="")
     a = ap.parse_args()
-    print(build(a.recruiters, a.data, a.out, date.fromisoformat(a.as_of)))
+    print(build(a.recruiters, a.data, a.out, date.fromisoformat(a.as_of),
+                include_log=not a.no_log, log_url=a.log_url))
